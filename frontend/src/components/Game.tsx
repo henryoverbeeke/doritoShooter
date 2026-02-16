@@ -26,6 +26,7 @@ export default function Game({ gameState, mySlot, winner, phase, onInput, onAirs
   const onRestartRef = useRef(onRestart);
   const keySequence = useRef<string[]>([]);
   const laserSequence = useRef<string[]>([]);
+  const missileSequence = useRef<string[]>([]);
   const [airstrikeReady, setAirstrikeReady] = useState(true);
 
   stateRef.current = gameState;
@@ -83,6 +84,29 @@ export default function Game({ gameState, mySlot, winner, phase, onInput, onAirs
         }
       } else {
         laserSequence.current = [];
+      }
+
+      // Detect "333" for missile strike (alias of airstrike)
+      if (e.key === '3') {
+        missileSequence.current.push('3');
+        if (missileSequence.current.length > 3) {
+          missileSequence.current = missileSequence.current.slice(-3);
+        }
+        // Check if we have three 3's in a row
+        if (
+          missileSequence.current.length === 3 &&
+          missileSequence.current[0] === '3' &&
+          missileSequence.current[1] === '3' &&
+          missileSequence.current[2] === '3' &&
+          phaseRef.current === 'playing'
+        ) {
+          console.log('🚀 Missile attack triggered (333)!');
+          onAirstrikeRef.current();
+          missileSequence.current = [];
+        }
+      } else if (e.key !== '3') {
+        // Only reset if it's not a 3
+        missileSequence.current = [];
       }
     };
     const onUp = (e: KeyboardEvent) => KEYS.delete(e.key.toLowerCase());

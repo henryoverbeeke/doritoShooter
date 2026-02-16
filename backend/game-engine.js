@@ -8,10 +8,10 @@ const ROTATE_SPEED = 0.06;
 const SHOOT_COOLDOWN = 300;
 const MAX_HP = 5;
 
-const AIRSTRIKE_RADIUS = 60;
-const AIRSTRIKE_DAMAGE = 3;
+const AIRSTRIKE_RADIUS = 80;
+const AIRSTRIKE_DAMAGE = 5; // instant kill (matches MAX_HP)
 const AIRSTRIKE_COUNT = 5;
-const AIRSTRIKE_WARN_TICKS = 45; // 1.5 seconds warning at 30 ticks/sec
+const AIRSTRIKE_WARN_TICKS = 30; // 1 second warning at 30 ticks/sec
 const AIRSTRIKE_EXPLODE_TICKS = 12; // explosion lasts 0.4s
 
 const PLAYER_COLORS = [
@@ -124,19 +124,17 @@ function triggerAirstrike(state, callerSlot) {
   const enemies = state.players.filter((p) => p.id !== callerSlot && p.alive);
   const strikes = [];
 
+  if (enemies.length === 0) return true;
+
   for (const enemy of enemies) {
-    // Drop 2-3 strikes around each enemy's current position (with scatter)
+    // Homing missiles: each strike tracks one enemy (targetId)
     const count = enemies.length === 1 ? AIRSTRIKE_COUNT : Math.ceil(AIRSTRIKE_COUNT / enemies.length);
     for (let i = 0; i < count; i++) {
-      const offsetX = (Math.random() - 0.5) * 120;
-      const offsetY = (Math.random() - 0.5) * 120;
       strikes.push({
-        pos: {
-          x: Math.max(AIRSTRIKE_RADIUS, Math.min(CANVAS_W - AIRSTRIKE_RADIUS, enemy.pos.x + offsetX)),
-          y: Math.max(AIRSTRIKE_RADIUS, Math.min(CANVAS_H - AIRSTRIKE_RADIUS, enemy.pos.y + offsetY)),
-        },
+        pos: { x: enemy.pos.x, y: enemy.pos.y },
         radius: AIRSTRIKE_RADIUS,
         ownerId: callerSlot,
+        targetId: enemy.id, // missile follows this player
         color: caller.color,
         ticksLeft: AIRSTRIKE_WARN_TICKS + Math.floor(Math.random() * 10),
         phase: 'warning',
@@ -152,16 +150,28 @@ function updateAirstrikes(state) {
   state.airstrikes = state.airstrikes.filter((strike) => {
     strike.ticksLeft--;
 
+    // Homing: move strike position to follow target each tick
+    if (strike.targetId != null && strike.phase === 'warning') {
+      const target = state.players.find((p) => p.id === strike.targetId);
+      if (target && target.alive) {
+        strike.pos.x = target.pos.x;
+        strike.pos.y = target.pos.y;
+      }
+    }
+
     if (strike.phase === 'warning' && strike.ticksLeft <= 0) {
       // Transition to explode phase -- deal damage now
       strike.phase = 'explode';
       strike.ticksLeft = AIRSTRIKE_EXPLODE_TICKS;
 
+      // Damage all players in range EXCEPT the one who called it
       for (const p of state.players) {
         if (p.id === strike.ownerId || !p.alive) continue;
         const dx = p.pos.x - strike.pos.x;
         const dy = p.pos.y - strike.pos.y;
-        if (dx * dx + dy * dy < (strike.radius + PLAYER_SIZE) ** 2) {
+        const distSq = dx * dx + dy * dy;
+        const hitRadius = (strike.radius + PLAYER_SIZE) ** 2;
+        if (distSq < hitRadius) {
           p.hp -= AIRSTRIKE_DAMAGE;
           if (p.hp <= 0) {
             p.hp = 0;
@@ -230,6 +240,34 @@ function updateLasers(state) {
   });
 }
 
+function updateAI(player, state, now) {
+  if (!player.alive) return;
+  const enemies = state.players.filter((p) => p.id !== player.id && p.alive);
+  if (enemies.length === 0) return;
+
+  let nearest = enemies[0];
+  let minDist = Infinity;
+  for (const e of enemies) {
+    const d = Math.hypot(e.pos.x - player.pos.x, e.pos.y - player.pos.y);
+    if (d < minDist) { minDist = d; nearest = e; }
+  }
+
+  const targetAngle = Math.atan2(nearest.pos.y - player.pos.y, nearest.pos.x - player.pos.x);
+  let diff = targetAngle - player.angle;
+  while (diff > Math.PI) diff -= 2 * Math.PI;
+  while (diff < -Math.PI) diff += 2 * Math.PI;
+
+  const rotate = diff > 0.1 ? 1 : diff < -0.1 ? -1 : 0;
+  const forward = minDist > 150 ? 1 : minDist < 80 ? -1 : 0;
+
+  movePlayer(player, forward, rotate, state.obstacles);
+
+  if (Math.abs(diff) < 0.3) {
+    const bullet = shoot(player, now);
+    if (bullet) state.bullets.push(bullet);
+  }
+}
+
 function updateBullets(state) {
   state.bullets = state.bullets.filter((b) => {
     b.pos.x += b.vel.x;
@@ -267,4 +305,5 @@ module.exports = {
   createObstacles, createPlayer, createInitialState,
   movePlayer, shoot, shootLaser, updateBullets,
   triggerAirstrike, updateAirstrikes, updateLasers,
+  updateAI,
 };
