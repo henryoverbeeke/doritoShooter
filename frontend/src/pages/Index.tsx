@@ -15,7 +15,7 @@ const Index = () => {
           phase={mp.phase}
           onInput={mp.sendInput}
           onAirstrike={mp.sendAirstrike}
-          onLaser={mp.sendLaser}
+          onGodMode={mp.sendGodMode}
           onRestart={mp.restart}
         />
       );

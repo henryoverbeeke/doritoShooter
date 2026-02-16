@@ -4,9 +4,8 @@ const path = require('path');
 const { WebSocketServer } = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const {
-  createInitialState, movePlayer, shoot, updateBullets,
-  triggerAirstrike, updateAirstrikes,
-  triggerLaser, updateLasers,
+  createInitialState, movePlayer, shoot, shootLaser, updateBullets,
+  triggerAirstrike, updateAirstrikes, updateLasers,
 } = require('./game-engine');
 
 const PORT = process.env.PORT || 8080;
@@ -106,8 +105,13 @@ function gameTick(room) {
     movePlayer(player, forward, rotate, room.state.obstacles);
 
     if (input.shoot) {
-      const bullet = shoot(player, now);
-      if (bullet) room.state.bullets.push(bullet);
+      if (player.godMode) {
+        const laser = shootLaser(player, room.state, now);
+        if (laser) room.state.lasers.push(laser);
+      } else {
+        const bullet = shoot(player, now);
+        if (bullet) room.state.bullets.push(bullet);
+      }
     }
   }
 
@@ -303,13 +307,13 @@ wss.on('connection', (ws) => {
         break;
       }
 
-      case 'laser': {
+      case 'god_mode': {
         if (!currentRoom || currentRoom.phase !== 'playing') break;
         const client = currentRoom.clients.get(playerId);
         if (!client || client.slot === null) break;
-        const ok = triggerLaser(currentRoom.state, client.slot);
-        if (!ok) {
-          sendTo(ws, { type: 'error', message: 'Laser already used!' });
+        const player = currentRoom.state.players.find((p) => p.id === client.slot);
+        if (player) {
+          player.godMode = true;
         }
         break;
       }

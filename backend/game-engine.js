@@ -60,7 +60,7 @@ function createPlayer(slotId) {
     lastShot: 0,
     alive: true,
     airstrikeUsed: false,
-    laserUsed: false,
+    godMode: false,
   };
 }
 
@@ -175,34 +175,29 @@ function updateAirstrikes(state) {
   });
 }
 
-const LASER_DISPLAY_TICKS = 15;
+const LASER_DISPLAY_TICKS = 10;
 const LASER_WIDTH = 8;
+const LASER_DAMAGE = 2;
 
-function triggerLaser(state, callerSlot) {
-  const caller = state.players.find((p) => p.id === callerSlot);
-  if (!caller || !caller.alive || caller.laserUsed) return false;
+function shootLaser(player, state, now) {
+  if (!player.alive || now - player.lastShot < SHOOT_COOLDOWN) return null;
+  player.lastShot = now;
 
-  caller.laserUsed = true;
+  const startX = player.pos.x + Math.cos(player.angle) * (PLAYER_SIZE + 5);
+  const startY = player.pos.y + Math.sin(player.angle) * (PLAYER_SIZE + 5);
 
-  const startX = caller.pos.x + Math.cos(caller.angle) * (PLAYER_SIZE + 5);
-  const startY = caller.pos.y + Math.sin(caller.angle) * (PLAYER_SIZE + 5);
-
-  // Trace the beam to the edge of the canvas
-  const dx = Math.cos(caller.angle);
-  const dy = Math.sin(caller.angle);
+  const dx = Math.cos(player.angle);
+  const dy = Math.sin(player.angle);
   let endX = startX;
   let endY = startY;
-  const step = 2;
-  for (let t = 0; t < 1500; t += step) {
+  for (let t = 0; t < 1500; t += 2) {
     endX = startX + dx * t;
     endY = startY + dy * t;
     if (endX < 0 || endX > CANVAS_W || endY < 0 || endY > CANVAS_H) break;
   }
 
-  // Damage any enemy player within LASER_WIDTH of the beam line
   for (const p of state.players) {
-    if (p.id === callerSlot || !p.alive) continue;
-    // Point-to-line distance
+    if (p.id === player.id || !p.alive) continue;
     const apx = p.pos.x - startX;
     const apy = p.pos.y - startY;
     const abx = endX - startX;
@@ -213,21 +208,19 @@ function triggerLaser(state, callerSlot) {
     const closestY = startY + t * aby;
     const dist = Math.sqrt((p.pos.x - closestX) ** 2 + (p.pos.y - closestY) ** 2);
     if (dist < LASER_WIDTH + PLAYER_SIZE) {
-      p.hp = 0;
-      p.alive = false;
+      p.hp -= LASER_DAMAGE;
+      if (p.hp <= 0) { p.hp = 0; p.alive = false; }
     }
   }
 
-  state.lasers.push({
+  return {
     start: { x: startX, y: startY },
     end: { x: endX, y: endY },
-    ownerId: callerSlot,
-    color: caller.color,
-    glowColor: caller.glowColor,
+    ownerId: player.id,
+    color: player.color,
+    glowColor: player.glowColor,
     ticksLeft: LASER_DISPLAY_TICKS,
-  });
-
-  return true;
+  };
 }
 
 function updateLasers(state) {
@@ -272,7 +265,6 @@ module.exports = {
   AIRSTRIKE_WARN_TICKS, AIRSTRIKE_EXPLODE_TICKS,
   PLAYER_COLORS, SPAWN_POINTS, SPAWN_ANGLES,
   createObstacles, createPlayer, createInitialState,
-  movePlayer, shoot, updateBullets,
-  triggerAirstrike, updateAirstrikes,
-  triggerLaser, updateLasers,
+  movePlayer, shoot, shootLaser, updateBullets,
+  triggerAirstrike, updateAirstrikes, updateLasers,
 };

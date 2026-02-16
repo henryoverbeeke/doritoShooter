@@ -11,18 +11,18 @@ interface GameProps {
   phase: string;
   onInput: (forward: number, rotate: number, shoot: boolean) => void;
   onAirstrike: () => void;
-  onLaser: () => void;
+  onGodMode: () => void;
   onRestart: () => void;
 }
 
-export default function Game({ gameState, mySlot, winner, phase, onInput, onAirstrike, onLaser, onRestart }: GameProps) {
+export default function Game({ gameState, mySlot, winner, phase, onInput, onAirstrike, onGodMode, onRestart }: GameProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
   const stateRef = useRef<GameState>(gameState);
   const phaseRef = useRef(phase);
   const onInputRef = useRef(onInput);
   const onAirstrikeRef = useRef(onAirstrike);
-  const onLaserRef = useRef(onLaser);
+  const onGodModeRef = useRef(onGodMode);
   const onRestartRef = useRef(onRestart);
   const keySequence = useRef<string[]>([]);
   const laserSequence = useRef<string[]>([]);
@@ -32,7 +32,7 @@ export default function Game({ gameState, mySlot, winner, phase, onInput, onAirs
   phaseRef.current = phase;
   onInputRef.current = onInput;
   onAirstrikeRef.current = onAirstrike;
-  onLaserRef.current = onLaser;
+  onGodModeRef.current = onGodMode;
   onRestartRef.current = onRestart;
 
   // Track if our player has used their airstrike
@@ -78,7 +78,7 @@ export default function Game({ gameState, mySlot, winner, phase, onInput, onAirs
         if (laserSequence.current.length === 2 &&
             laserSequence.current.every((k, i) => k === LASER_CODE[i]) &&
             phaseRef.current === 'playing') {
-          onLaserRef.current();
+          onGodModeRef.current();
           laserSequence.current = [];
         }
       } else {

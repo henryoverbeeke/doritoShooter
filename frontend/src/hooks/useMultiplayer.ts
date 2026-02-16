@@ -187,8 +187,8 @@ export function useMultiplayer() {
     send({ type: 'airstrike' });
   }, [send]);
 
-  const sendLaser = useCallback(() => {
-    send({ type: 'laser' });
+  const sendGodMode = useCallback(() => {
+    send({ type: 'god_mode' });
   }, [send]);
 
   const restart = useCallback(() => {
@@ -209,6 +209,6 @@ export function useMultiplayer() {
   return {
     phase, playerId, roomId, lobby, gameState, winner, rooms, error, mySlot, connected,
     connect, disconnect, createRoom, joinRoom, selectCorner, startGame,
-    sendInput, sendAirstrike, sendLaser, refreshRooms, restart,
+    sendInput, sendAirstrike, sendGodMode, refreshRooms, restart,
   };
 }
