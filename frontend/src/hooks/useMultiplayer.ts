@@ -1,14 +1,25 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import type { GameState } from '@/game/types';
+import { IS_DEV_MODE } from '@/config/devMode';
 
 function getWsUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  // In dev mode, Vite serves on a different port than the game server.
-  // Connect directly to the EC2 backend. In production the frontend
-  // is served by the same server, so window.location.host works.
-  if (import.meta.env.DEV) {
-    return 'ws://52.15.179.179:8080';
+  
+  // Check for local dev mode via environment variable
+  const useLocalBackend = import.meta.env.VITE_USE_LOCAL_BACKEND === 'true';
+  const localBackendPort = import.meta.env.VITE_LOCAL_BACKEND_PORT || '8080';
+  const ec2BackendUrl = import.meta.env.VITE_EC2_BACKEND_URL || 'ws://52.15.179.179:8080';
+  
+  // In dev mode, check if we should use local backend
+  if (IS_DEV_MODE) {
+    if (useLocalBackend) {
+      return `ws://localhost:${localBackendPort}`;
+    }
+    // Default to EC2 backend in dev mode
+    return ec2BackendUrl;
   }
+  
+  // In production, use the same server
   return `${protocol}//${window.location.host}`;
 }
 
@@ -59,7 +70,11 @@ export function useMultiplayer() {
     setError(null);
 
     const url = getWsUrl();
-    console.log(`Connecting to ${url}...`);
+    const useLocalBackend = import.meta.env.VITE_USE_LOCAL_BACKEND === 'true';
+    console.log(`🔌 Connecting to ${url}...`);
+    if (import.meta.env.DEV) {
+      console.log(`📡 Dev mode: ${useLocalBackend ? 'LOCAL backend' : 'EC2 backend'}`);
+    }
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
@@ -129,8 +144,17 @@ export function useMultiplayer() {
       }
     };
 
-    ws.onerror = () => {
-      setError('Could not connect to game server');
+    ws.onerror = (error) => {
+      const useLocalBackend = import.meta.env.VITE_USE_LOCAL_BACKEND === 'true';
+      const localBackendPort = import.meta.env.VITE_LOCAL_BACKEND_PORT || '8080';
+      
+      if (useLocalBackend && import.meta.env.DEV) {
+        setError(`Could not connect to local backend at localhost:${localBackendPort}. Make sure the backend is running!`);
+        console.error('❌ WebSocket connection error:', error);
+        console.log(`💡 Start the backend with: cd backend && npm start`);
+      } else {
+        setError('Could not connect to game server');
+      }
       setConnected(false);
     };
   }, []);

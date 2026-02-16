@@ -5,13 +5,16 @@ const { WebSocketServer } = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const {
   createInitialState, movePlayer, shoot, shootLaser, updateBullets,
-  triggerAirstrike, updateAirstrikes, updateLasers,
+  triggerAirstrike, updateAirstrikes, updateLasers, updateAI, createPlayer,
 } = require('./game-engine');
 
-const PORT = process.env.PORT || 8080;
+const { IS_DEV_MODE, ENABLE_AI_IN_DEV, PORT: CONFIG_PORT } = require('./config');
+
+const PORT = CONFIG_PORT;
 const TICK_RATE = 30;
 const TICK_INTERVAL = 1000 / TICK_RATE;
 const STATIC_DIR = path.join(__dirname, 'public');
+const DEV_MODE = IS_DEV_MODE;
 
 const CORNER_NAMES = ['Top-Left', 'Top-Right', 'Bottom-Center'];
 
@@ -42,6 +45,7 @@ function createRoom() {
     id: roomId,
     slots: [null, null, null],
     clients: new Map(),
+    aiPlayers: new Set(), // Track which slots are AI players
     state: null,
     tickTimer: null,
     phase: 'lobby',
@@ -71,6 +75,9 @@ function lobbyState(room) {
     roomId: room.id,
     slots: room.slots.map((pid, i) => {
       if (!pid) return { slot: i, corner: CORNER_NAMES[i], taken: false, playerName: null };
+      if (room.aiPlayers.has(i)) {
+        return { slot: i, corner: CORNER_NAMES[i], taken: true, playerName: 'AI Player' };
+      }
       const client = room.clients.get(pid);
       return { slot: i, corner: CORNER_NAMES[i], taken: true, playerName: client?.name || 'Player' };
     }),
@@ -82,6 +89,32 @@ function startGame(room) {
   const occupiedSlots = room.slots
     .map((pid, i) => (pid ? i : -1))
     .filter((i) => i >= 0);
+
+  // In dev mode, fill empty slots with AI players
+  if (DEV_MODE && ENABLE_AI_IN_DEV) {
+    const allSlots = [0, 1, 2];
+    const emptySlots = allSlots.filter(i => !occupiedSlots.includes(i));
+    
+    // Fill empty slots with AI (need at least 2 players total)
+    if (occupiedSlots.length === 1 && emptySlots.length > 0) {
+      // Add one AI player if only one human player
+      const aiSlot = emptySlots[0];
+      room.slots[aiSlot] = 'AI_' + aiSlot; // Use special ID for AI
+      room.aiPlayers.add(aiSlot);
+      occupiedSlots.push(aiSlot);
+      console.log(`🤖 Added AI player to slot ${aiSlot} in dev mode`);
+    } else if (occupiedSlots.length === 0 && emptySlots.length >= 2) {
+      // If no players, add 2 AI players for testing
+      const aiSlot1 = emptySlots[0];
+      const aiSlot2 = emptySlots[1];
+      room.slots[aiSlot1] = 'AI_' + aiSlot1;
+      room.slots[aiSlot2] = 'AI_' + aiSlot2;
+      room.aiPlayers.add(aiSlot1);
+      room.aiPlayers.add(aiSlot2);
+      occupiedSlots.push(aiSlot1, aiSlot2);
+      console.log(`🤖 Added 2 AI players for testing in dev mode`);
+    }
+  }
 
   room.state = createInitialState(occupiedSlots);
   room.phase = 'playing';
@@ -95,6 +128,7 @@ function gameTick(room) {
   if (room.phase !== 'playing') return;
   const now = Date.now();
 
+  // Handle human player inputs
   for (const [, client] of room.clients) {
     const player = room.state.players.find((p) => p.id === client.slot);
     if (!player || !player.alive) continue;
@@ -112,6 +146,14 @@ function gameTick(room) {
         const bullet = shoot(player, now);
         if (bullet) room.state.bullets.push(bullet);
       }
+    }
+  }
+
+  // Handle AI players
+  for (const aiSlot of room.aiPlayers) {
+    const player = room.state.players.find((p) => p.id === aiSlot);
+    if (player && player.alive) {
+      updateAI(player, room.state, now);
     }
   }
 
@@ -245,6 +287,7 @@ wss.on('connection', (ws) => {
         const room = createRoom();
         currentRoom = room;
         room.clients.set(playerId, { ws, slot: null, name: msg.name || 'Player', currentInput: {} });
+        
         sendTo(ws, { type: 'room_joined', roomId: room.id });
         sendTo(ws, lobbyState(room));
         console.log(`Room ${room.id} created by ${msg.name || 'Player'}`);
@@ -260,6 +303,7 @@ wss.on('connection', (ws) => {
         }
         currentRoom = room;
         room.clients.set(playerId, { ws, slot: null, name: msg.name || 'Player', currentInput: {} });
+        
         sendTo(ws, { type: 'room_joined', roomId: room.id });
         broadcastToRoom(room, lobbyState(room));
         console.log(`${msg.name || 'Player'} joined room ${room.id}`);
@@ -270,26 +314,62 @@ wss.on('connection', (ws) => {
         if (!currentRoom || currentRoom.phase !== 'lobby') break;
         const slot = msg.slot;
         if (slot < 0 || slot > 2) break;
-        if (currentRoom.slots[slot] !== null && currentRoom.slots[slot] !== playerId) {
-          sendTo(ws, { type: 'error', message: 'That corner is already taken!' });
-          break;
+        const slotOccupant = currentRoom.slots[slot];
+        if (slotOccupant !== null && slotOccupant !== playerId) {
+          // In dev mode, allow taking AI slots
+          if (DEV_MODE && ENABLE_AI_IN_DEV && slotOccupant.toString().startsWith('AI_')) {
+            currentRoom.aiPlayers.delete(slot);
+          } else {
+            sendTo(ws, { type: 'error', message: 'That corner is already taken!' });
+            break;
+          }
         }
         const client = currentRoom.clients.get(playerId);
         if (client.slot !== null && client.slot !== undefined) {
-          currentRoom.slots[client.slot] = null;
+          const oldSlot = client.slot;
+          currentRoom.slots[oldSlot] = null;
+          // If old slot was AI, remove it
+          if (currentRoom.aiPlayers.has(oldSlot)) {
+            currentRoom.aiPlayers.delete(oldSlot);
+          }
         }
         currentRoom.slots[slot] = playerId;
         client.slot = slot;
+        
+        // In dev mode, ensure at least 2 players total (human + AI)
+        if (DEV_MODE && ENABLE_AI_IN_DEV) {
+          const humanCount = currentRoom.slots.filter(s => s !== null && !s.toString().startsWith('AI_')).length;
+          const emptySlots = [0, 1, 2].filter(i => currentRoom.slots[i] === null);
+          
+          // If only 1 human player, add an AI player to an empty slot
+          if (humanCount === 1 && emptySlots.length > 0) {
+            const aiSlot = emptySlots[0];
+            currentRoom.slots[aiSlot] = 'AI_' + aiSlot;
+            currentRoom.aiPlayers.add(aiSlot);
+            console.log(`🤖 Auto-added AI player to slot ${aiSlot} in dev mode`);
+          }
+        }
+        
         broadcastToRoom(currentRoom, lobbyState(currentRoom));
         break;
       }
 
       case 'start_game': {
         if (!currentRoom || currentRoom.phase !== 'lobby') break;
-        const humanCount = currentRoom.slots.filter((s) => s !== null).length;
-        if (humanCount < 2) {
-          sendTo(ws, { type: 'error', message: 'Need at least 2 players to start!' });
-          break;
+        const humanCount = currentRoom.slots.filter((s) => s !== null && !s.toString().startsWith('AI_')).length;
+        const totalCount = currentRoom.slots.filter((s) => s !== null).length;
+        
+        // In dev mode with AI enabled, allow starting with 1 human player
+        if (DEV_MODE && ENABLE_AI_IN_DEV) {
+          if (humanCount < 1) {
+            sendTo(ws, { type: 'error', message: 'Need at least 1 player to start!' });
+            break;
+          }
+        } else {
+          if (totalCount < 2) {
+            sendTo(ws, { type: 'error', message: 'Need at least 2 players to start!' });
+            break;
+          }
         }
         startGame(currentRoom);
         break;
@@ -356,4 +436,14 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`Dorito Shooter server running on http://0.0.0.0:${PORT}`);
   console.log(`Serving static files from ${STATIC_DIR}`);
   console.log(`WebSocket ready on ws://0.0.0.0:${PORT}`);
+  console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+  if (IS_DEV_MODE) {
+    console.log(`🔧 DEVELOPMENT MODE: ENABLED`);
+    if (ENABLE_AI_IN_DEV) {
+      console.log(`🤖 AI Players: Enabled (auto-fill empty slots)`);
+    }
+  } else {
+    console.log(`🚀 PRODUCTION MODE`);
+  }
+  console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
 });

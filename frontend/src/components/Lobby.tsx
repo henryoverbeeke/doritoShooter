@@ -137,7 +137,9 @@ export default function Lobby({
 
   // In lobby, selecting corners
   if (phase === 'lobby' && lobby) {
-    const humanCount = lobby.slots.filter((s) => s.taken).length;
+    const humanCount = lobby.slots.filter((s) => s.taken && s.playerName !== 'AI Player').length;
+    const totalCount = lobby.slots.filter((s) => s.taken).length;
+    const canStart = mySlot !== null && totalCount >= 2;
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-6 bg-background">
         <h1 className="text-3xl font-bold font-mono tracking-widest text-primary uppercase">
@@ -191,15 +193,15 @@ export default function Lobby({
         </div>
 
         <p className="text-muted-foreground font-mono text-sm">
-          {humanCount < 2
-            ? `Waiting for players... (${humanCount}/2 minimum)`
-            : `${humanCount} players ready!`
+          {canStart
+            ? `${totalCount} player${totalCount > 1 ? 's' : ''} ready!${humanCount < totalCount ? ' (with AI)' : ''}`
+            : `Waiting for players... (${totalCount}/2 minimum)`
           }
         </p>
 
         <button
           onClick={onStartGame}
-          disabled={mySlot === null || humanCount < 2}
+          disabled={!canStart}
           className="mt-2 px-8 py-3 rounded-lg font-mono font-bold text-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           Start Game
